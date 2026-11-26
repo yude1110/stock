@@ -1,0 +1,90 @@
+{
+  "cash": {
+    "TWD": 2264719,
+    "USD": 99650.92
+  },
+  "realized": {
+    "TWD": 0,
+    "USD": 0
+  },
+  "positions": {
+    "2330.TW": {
+      "qty": 1000,
+      "avgCost": 2233.177,
+      "currency": "TWD",
+      "name": "台積電"
+    },
+    "AAPL": {
+      "qty": 1,
+      "avgCost": 349.08,
+      "currency": "USD",
+      "name": "Apple Inc."
+    },
+    "0050.TW": {
+      "qty": 5400,
+      "avgCost": 92.9822222222222,
+      "currency": "TWD",
+      "name": "元大台灣50"
+    }
+  },
+  "orders": [
+    {
+      "id": "cf741519",
+      "symbol": "0050.TW",
+      "name": "元大台灣50",
+      "side": "buy",
+      "type": "limit",
+      "qty": 5400,
+      "price": 92.85,
+      "status": "filled",
+      "createdAt": "2026-11-26T14:15:19.878Z",
+      "fillPrice": 92.85,
+      "fee": 714,
+      "tax": 0,
+      "filledAt": "2026-11-26T14:15:19.879Z"
+    },
+    {
+      "id": "15165249",
+      "symbol": "0050.TW",
+      "name": "元大台灣50",
+      "side": "sell",
+      "type": "limit",
+      "qty": 5400,
+      "price": 92.85,
+      "status": "rejected",
+      "createdAt": "2026-11-26T14:15:06.749Z",
+      "reason": "庫存不足（持有 0 股）"
+    },
+    {
+      "id": "485a8fb2",
+      "symbol": "AAPL",
+      "name": "Apple Inc.",
+      "side": "buy",
+      "type": "limit",
+      "qty": 1,
+      "price": 349.08,
+      "status": "filled",
+      "createdAt": "2026-11-24T12:28:36.125Z",
+      "fillPrice": 349.08,
+      "fee": 0,
+      "tax": 0,
+      "filledAt": "2026-11-24T12:28:36.125Z"
+    },
+    {
+      "id": "3b174d0c",
+      "symbol": "2330.TW",
+      "name": "台積電",
+      "side": "buy",
+      "type": "limit",
+      "qty": 1000,
+      "price": 2230,
+      "status": "filled",
+      "createdAt": "2026-11-24T12:27:36.850Z",
+      "fillPrice": 2230,
+      "fee": 3177,
+      "tax": 0,
+      "filledAt": "2026-11-24T12:27:36.850Z"
+    }
+  ],
+  "createdAt": "2026-11-24T12:27:08.911Z"
+}

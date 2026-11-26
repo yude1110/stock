@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>即時股票追蹤器</title>
+<link rel="stylesheet" href="/base.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📈 即時股票追蹤器</h1>
+    <div class="seg" id="seg"><span class="pill"></span>
+      <button data-m="tw">台股</button><button data-m="us">美股</button>
+    </div>
+    <span id="state" class="badge">載入中…</span>
+    <span id="updated" class="badge">—</span>
+    <span class="spacer"></span>
+    <div class="search"><input placeholder="搜尋股票：2330、台積電、NVDA…" autocomplete="off"></div>
+    <a class="btn" href="/stock.html#account" title="模擬交易帳戶">💼 交易帳戶</a>
+    <button id="trBtn" title="英文新聞標題下方附上中文翻譯（英文原文保留）">英文附中譯</button>
+    <button id="colorBtn" title="切換漲跌顏色">紅漲綠跌</button>
+    <button id="refreshBtn" title="立即更新"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg> 更新</button>
+  </header>
+
+  <div class="tape"><div class="track" id="tape"></div></div>
+
+  <main id="main">
+    <section class="indices" id="indices"></section>
+
+    <h2>🔥 今日焦點 <small id="focusHint"></small></h2>
+    <section class="focus" id="focus"></section>
+
+    <div class="grid">
+      <div class="col">
+        <div class="panel">
+          <h2>⭐ 我的自選股 <small>台美股可混合 · 每 15 秒更新 · 點選看走勢，再進入完整分析</small></h2>
+          <form class="addrow" id="addForm">
+            <input id="addInput" placeholder="輸入代號：2330、6488、0050、TSLA、BTC-USD…" autocomplete="off">
+            <button>加入</button>
+          </form>
+          <div class="scroll"><table>
+            <thead><tr><th>代號</th><th>今日走勢</th><th>價格</th><th>漲跌</th><th>漲跌幅</th><th></th></tr></thead>
+            <tbody id="watch"></tbody>
+          </table></div>
+        </div>
+        <div class="panel">
+          <div class="tabs" id="exTabs"></div>
+          <div class="tabs" id="tabs"></div>
+          <div class="scroll"><table>
+            <thead id="moversHead"></thead>
+            <tbody id="movers"></tbody>
+          </table></div>
+        </div>
+        <div class="panel">
+          <h2 id="etfTitle">📊 ETF 與大盤</h2>
+          <div class="scroll"><table>
+            <thead><tr><th>ETF</th><th>今日走勢</th><th>價格</th><th>漲跌幅</th><th>成交量</th></tr></thead>
+            <tbody id="etfs"></tbody>
+          </table></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>📰 市場新聞 <small>每 5 分鐘更新</small></h2>
+        <ul class="news" id="news"></ul>
+      </div>
+    </div>
+  </main>
+
+  <footer>資料來源：Yahoo Finance、Yahoo 奇摩股市、鉅亨網、Google 新聞（部分報價可能延遲）。僅供參考，不構成投資建議。</footer>
+</div>
+
+<dialog id="dlg">
+  <div class="loadingbar" id="dlgLoad"></div>
+  <div class="dh">
+    <span class="t" id="dTitle"></span><span class="muted" id="dName"></span>
+    <span class="spacer"></span>
+    <a class="btn primary" id="dFull" href="#">📊 完整分析（技術 / 基本 / 籌碼 / 消息）→</a>
+    <button onclick="closeChart()">關閉 ✕</button>
+  </div>
+  <div class="dh"><span class="bigp num" id="dPrice"></span><span class="num" id="dChg" style="font-size:18px"></span><span class="muted" id="dNote" style="font-size:12px"></span></div>
+  <div class="tabs" id="ranges" style="margin-top:8px"></div>
+  <div class="chartbox" id="chartbox"></div>
+  <div class="stats" id="dStats"></div>
+  <h2>📰 相關新聞</h2>
+  <ul class="news" id="dNews"></ul>
+</dialog>
+
+<script src="/common.js"></script>
+<script>
+const NAMES = { '^GSPC': 'S&P 500', '^IXIC': '那斯達克', '^DJI': '道瓊工業', '^SOX': '費城半導體', '^VIX': 'VIX 恐慌指數', 'BTC-USD': '比特幣', 'TWD=X': '美元/台幣', 'WTX&': '台指期近一' };
+const label = x => NAMES[x.symbol] || (isTW(x.symbol) && x.name ? x.name : x.symbol);
+
+// ---------- 市場切換 ----------
+let market = new URLSearchParams(location.search).get('market') === 'us' ? 'us' : new URLSearchParams(location.search).get('market') === 'tw' ? 'tw' : store.get('market', 'tw');
+function movePill() {
+  const b = document.querySelector(`#seg button[data-m="${market}"]`), pill = $('#seg .pill');
+  document.querySelectorAll('#seg button').forEach(x => x.classList.toggle('on', x === b));
+  pill.style.width = b.offsetWidth + 'px'; pill.style.transform = `translateX(${b.offsetLeft - 3}px)`;
+}
+$('#seg').onclick = async e => {
+  const m = e.target.closest('button')?.dataset.m; if (!m || m === market) return;
+  market = m; store.set('market', m); movePill();
+  $('#main').classList.add('switching');
+  await new Promise(r => setTimeout(r, 250));
+  resetMarketView();
+  $('#main').classList.remove('switching');
+  all();
+};
+addEventListener('resize', movePill);
+
+const STATES = { REGULAR: ['盤中', true], PRE: ['盤前', true], POST: ['盤後', true], PREPRE: ['休市', false], POSTPOST: ['休市', false], CLOSED: ['已收盤', false] };
+function setState(s) {
+  const [l, live] = STATES[s] || ['—', false];
+  $('#state').textContent = (market === 'tw' ? '台股 ' : '美股 ') + l; $('#state').classList.toggle('live', live);
+}
+
+// ---------- 跑馬燈 + 指數 ----------
+let tapeItems = { idx: [], etf: [] };
+function renderTape() {
+  const items = [...tapeItems.idx, ...tapeItems.etf, ...watchData].filter(x => x && !x.error);
+  if (!items.length) return;
+  const html = items.map(x => `<span class="it" data-sym="${esc(x.symbol)}" data-name="${esc(x.name)}"><b>${esc(label(x))}</b><span class="num">${fmtP(x.price)}</span>
+    <span class="${cls(x.changePct)}"> ${x.changePct > 0 ? '▲' : x.changePct < 0 ? '▼' : ''}${fmtPct(x.changePct)}</span></span>`).join('');
+  $('#tape').innerHTML = html + html;
+  $('#tape').style.animationDuration = Math.max(30, items.length * 4) + 's';
+}
+
+let firstIdx = true;
+async function loadIndices() {
+  const d = (await api('/api/indices?market=' + market)).filter(x => !x.error);
+  tapeItems.idx = d;
+  const box = $('#indices');
+  box.innerHTML = d.map((x, i) => `
+    <div class="idx ${firstIdx ? 'enter' : ''}" style="--i:${i}" data-sym="${esc(x.symbol)}" data-name="${esc(x.name)}">
+      <div class="n">${esc(label(x))}</div>
+      <div class="p">${num('i:' + x.symbol, x.price, 'p')}</div>
+      <div class="c ${cls(x.change)}">${num('ic:' + x.symbol, x.change, 'chg')} (${num('ip:' + x.symbol, x.changePct, 'pct')})</div>
+      ${spark(x.spark, x.change >= 0, 80, 30)}</div>`).join('');
+  firstIdx = false;
+  animateNums(box); renderTape();
+}
+
+// ---------- 今日焦點 ----------
+let focusSeen = new Set();
+async function loadFocus() {
+  const d = await api('/api/headlines?market=' + market);
+  if (d[0]?.marketState) setState(d[0].marketState);
+  const box = $('#focus');
+  box.innerHTML = d.map((q, i) => {
+    const verb = q.changePct >= 0 ? '上漲' : '下跌';
+    const isNew = !focusSeen.has(q.symbol);
+    const hot = Math.abs(q.changePct) >= 9;
+    const reasons = q.reasons?.length
+      ? `<ul>${q.reasons.map(n => `<li>${titleLink(n)}
+           <div class="src">${esc(n.publisher)} · ${ago(n.time)}</div>${newsActs(n)}</li>`).join('')}</ul>`
+      : `<div class="nonews">暫無相關新聞，可能為技術面或資金面波動</div>`;
+    const meta = market === 'tw'
+      ? `${esc(q.name)} · ${fmtP(q.price)} 元 · 成交值 ${big(q.turnover)} · 成交量 ${vol(q.volume, q.symbol)}`
+      : `${esc(q.name)} · $${fmtP(q.price)} · 成交量 ${big(q.volume)}${q.avgVolume ? `（均量 ${(q.volume / q.avgVolume).toFixed(1)} 倍）` : ''} · 市值 ${big(q.marketCap)}`;
+    return `<div class="card ${isNew ? 'enter' : ''} ${hot ? 'hot' : ''}" style="--i:${i};--c:var(${q.changePct >= 0 ? '--up' : '--down'})">
+      <div class="q">為什麼 <a href="#" data-sym="${esc(q.symbol)}" data-name="${esc(q.name)}">${esc(market === 'tw' ? q.name + ' ' + short(q.symbol) : q.symbol)}</a> ${verb}了
+        <span class="pct num ${cls(q.changePct)}">${Math.abs(q.changePct).toFixed(2)}%</span>？${q.limitUp ? '<span class="tag lu">漲停</span>' : q.limitDown ? '<span class="tag ld">跌停</span>' : ''}</div>
+      <div class="meta">${meta}</div>${reasons}</div>`;
+  }).join('') || '<div class="muted">目前沒有資料</div>';
+  focusSeen = new Set(d.map(q => q.symbol));
+  autoTr(box);
+}
+
+// ---------- 自選股 ----------
+let watch = store.get('watchlist2', ['2330.TW', '2317.TW', '2454.TW', '0050.TW', '6488.TWO', 'NVDA', 'AAPL', 'TSLA', 'TSM']);
+let watchData = [], lastPrice = {}, watchFirst = true;
+async function loadWatch() {
+  const body = $('#watch');
+  if (!watch.length) { body.innerHTML = '<tr><td colspan="6" class="muted">尚未加入任何股票</td></tr>'; watchData = []; return; }
+  watchData = await api('/api/quotes?symbols=' + encodeURIComponent(watch.join(',')));
+  body.classList.toggle('enter-rows', watchFirst); watchFirst = false;
+  body.innerHTML = watchData.map((x, i) => {
+    if (x.error) return `<tr style="--i:${i}"><td><span class="sym">${esc(x.symbol)}</span><span class="nm">查無資料</span></td><td colspan="4"></td>
+      <td><button class="x" data-del="${esc(x.symbol)}">✕</button></td></tr>`;
+    const prev = lastPrice[x.symbol]; lastPrice[x.symbol] = x.price;
+    const flash = prev != null && prev !== x.price ? (x.price > prev ? 'flash-up' : 'flash-down') : '';
+    const tw = isTW(x.symbol);
+    return `<tr class="row ${flash}" style="--i:${i}" data-sym="${esc(x.symbol)}" data-name="${esc(x.name)}">
+      <td><span class="sym">${esc(tw ? short(x.symbol) + ' ' + x.name : x.symbol)}</span><span class="nm">${tw ? (x.symbol.endsWith('.TWO') ? '上櫃' : '上市') : esc(x.name)}${x.limitUp ? ' · <span class="up">漲停</span>' : x.limitDown ? ' · <span class="down">跌停</span>' : ''}</span></td>
+      <td class="sparkcell">${spark(x.spark, x.change >= 0)}</td>
+      <td>${num('w:' + x.symbol, x.price, 'p')}</td>
+      <td class="${cls(x.change)}">${num('wc:' + x.symbol, x.change, 'chg')}</td>
+      <td class="${cls(x.change)}">${num('wp:' + x.symbol, x.changePct, 'pct')}</td>
+      <td><button class="x" data-del="${esc(x.symbol)}" title="移除">✕</button></td></tr>`;
+  }).join('');
+  animateNums(body); renderTape();
+}
+$('#addForm').onsubmit = async e => {
+  e.preventDefault();
+  const raw = $('#addInput').value.toUpperCase().split(/[\s,，]+/).filter(Boolean);
+  $('#addInput').value = '';
+  for (let s of raw) {
+    // 只輸入數字代號 → 自動判斷上市(.TW) 或上櫃(.TWO)
+    if (/^\d{4,6}[A-Z]?$/.test(s)) {
+      const r = await api(`/api/quotes?symbols=${s}.TW,${s}.TWO`).catch(() => []);
+      s = r.find(x => !x.error)?.symbol || s + '.TW';
+    }
+    if (!watch.includes(s)) watch.push(s);
+  }
+  store.set('watchlist2', watch); watchFirst = true; loadWatch();
+};
+
+// ---------- 排行榜 ----------
+const TABS = {
+  us: [['gainers', '漲幅榜'], ['losers', '跌幅榜'], ['actives', '成交量榜']],
+  tw: [['gainers', '漲幅榜'], ['losers', '跌幅榜'], ['turnover', '成交值榜'], ['volume', '成交量榜']],
+};
+let movers = null, tab = 'gainers', ex = 'tse';
+function renderTabs() {
+  $('#exTabs').innerHTML = market === 'tw'
+    ? `<button data-ex="tse" class="${ex === 'tse' ? 'on' : ''}">上市</button><button data-ex="otc" class="${ex === 'otc' ? 'on' : ''}">上櫃</button>` : '';
+  $('#exTabs').style.display = market === 'tw' ? '' : 'none';
+  $('#tabs').innerHTML = TABS[market].map(([k, l]) => `<button data-k="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('');
+  $('#moversHead').innerHTML = market === 'tw'
+    ? '<tr><th>股票</th><th>價格</th><th>漲跌幅</th><th>成交量</th><th>成交值</th></tr>'
+    : '<tr><th>代號</th><th>價格</th><th>漲跌幅</th><th>成交量</th><th>市值</th></tr>';
+}
+async function loadMovers() {
+  movers = await api('/api/movers?market=' + market);
+  if (movers.state) setState(movers.state);
+  renderMovers(false);
+}
+function renderMovers(anim = true) {
+  if (!movers) return;
+  const list = (market === 'tw' ? movers[ex]?.[tab] : movers[tab]) || [];
+  const body = $('#movers');
+  body.classList.toggle('enter-rows', anim);
+  body.innerHTML = list.slice(0, 20).map((x, i) => `
+    <tr class="row" style="--i:${i}" data-sym="${esc(x.symbol)}" data-name="${esc(x.name)}">
+      <td><span class="sym">${esc(market === 'tw' ? short(x.symbol) + ' ' + x.name : x.symbol)}</span>${market === 'tw' ? '' : `<span class="nm">${esc(x.name)}</span>`}</td>
+      <td>${fmtP(x.price)}</td>
+      <td class="${cls(x.changePct)}">${fmtPct(x.changePct)}${x.limitUp ? ' <span class="tag lu">停</span>' : x.limitDown ? ' <span class="tag ld">停</span>' : ''}</td>
+      <td>${vol(x.volume, x.symbol)}</td><td>${market === 'tw' ? big(x.turnover) : big(x.marketCap)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">暫無資料</td></tr>';
+}
+$('#tabs').onclick = e => { const k = e.target.dataset?.k; if (!k) return; tab = k; renderTabs(); renderMovers(); };
+$('#exTabs').onclick = e => { const k = e.target.dataset?.ex; if (!k) return; ex = k; renderTabs(); renderMovers(); };
+
+// ---------- ETF ----------
+let etfFirst = true;
+async function loadEtfs() {
+  const d = (await api('/api/etfs?market=' + market)).filter(x => !x.error);
+  tapeItems.etf = d;
+  const body = $('#etfs');
+  body.classList.toggle('enter-rows', etfFirst); etfFirst = false;
+  body.innerHTML = d.map((x, i) => `
+    <tr class="row" style="--i:${i}" data-sym="${esc(x.symbol)}" data-name="${esc(x.name)}">
+      <td><span class="sym">${esc(isTW(x.symbol) ? short(x.symbol) + ' ' + x.name : x.symbol)}</span>${isTW(x.symbol) ? '' : `<span class="nm">${esc(x.name)}</span>`}</td>
+      <td class="sparkcell">${spark(x.spark, x.change >= 0, 90, 28)}</td>
+      <td>${num('e:' + x.symbol, x.price, 'p')}</td>
+      <td class="${cls(x.change)}">${num('ep:' + x.symbol, x.changePct, 'pct')}</td>
+      <td>${vol(x.volume, x.symbol)}</td></tr>`).join('');
+  animateNums(body);
+}
+
+// ---------- 新聞 ----------
+const newsItem = (n, i = 0) => `<li class="enter" style="--i:${Math.min(i, 12)}">${n.thumb ? `<img src="${esc(n.thumb)}" alt="" loading="lazy">` : ''}
+  <div style="min-width:0;flex:1">${titleLink(n)}
+  <div class="src">${(n.tickers || []).slice(0, 4).map(t => `<span class="tick">${esc(t)}</span>`).join('')}${esc(n.publisher)} · ${ago(n.time)}</div>
+  ${newsActs(n)}</div></li>`;
+async function loadNews() {
+  const d = await api('/api/news?market=' + market);
+  $('#news').innerHTML = d.map(newsItem).join('') || '<li class="muted">暫無新聞</li>';
+  autoTr($('#news'));
+}
+
+// ================= 放大走勢圖 =================
+const RANGES = [['1d', '1日'], ['5d', '5日'], ['1mo', '1月'], ['6mo', '6月'], ['1y', '1年'], ['5y', '5年']];
+let cur = null; // { sym, name, range, data, timer }
+function openChart(sym, name) {
+  cur = { sym, name, range: '1d', data: null };
+  $('#dTitle').textContent = isTW(sym) ? short(sym) : sym;
+  $('#dName').textContent = name || '';
+  $('#dFull').href = stockUrl(sym);
+  $('#dPrice').textContent = ''; $('#dChg').textContent = ''; $('#dNote').textContent = '';
+  $('#chartbox').innerHTML = '<div class="sk" style="height:340px"></div>'; $('#dStats').innerHTML = '';
+  renderRanges();
+  $('#dlg').showModal();
+  loadChart(true);
+  const pct = watchData.find(x => x.symbol === sym)?.changePct ?? '';
+  $('#dNews').innerHTML = '<li><div class="sk" style="width:100%;min-height:60px"></div></li>';
+  api(`/api/news?symbol=${encodeURIComponent(sym)}&name=${encodeURIComponent(name || '')}&pct=${pct}`)
+    .then(d => { $('#dNews').innerHTML = d.map(newsItem).join('') || '<li class="muted">暫無相關新聞</li>'; autoTr($('#dNews')); })
+    .catch(() => { $('#dNews').innerHTML = '<li class="muted">新聞載入失敗</li>'; });
+  clearInterval(cur.timer);
+  cur.timer = setInterval(() => { if (cur?.range === '1d' && !document.hidden) loadChart(false); }, 15_000);
+}
+function closeChart() { clearInterval(cur?.timer); cur = null; $('#dlg').close(); }
+$('#dlg').addEventListener('close', () => { clearInterval(cur?.timer); cur = null; });
+$('#dlg').addEventListener('click', e => { if (e.target === $('#dlg')) closeChart(); });
+function renderRanges() {
+  $('#ranges').innerHTML = RANGES.map(([k, l]) => `<button data-r="${k}" class="${k === cur.range ? 'on' : ''}">${l}</button>`).join('');
+}
+$('#ranges').onclick = e => { const r = e.target.dataset?.r; if (!r || !cur) return; cur.range = r; renderRanges(); loadChart(true); };
+
+async function loadChart(animate) {
+  const my = cur; if (!my) return;
+  $('#dlgLoad').classList.add('on');
+  try {
+    const d = await api(`/api/chart?symbol=${encodeURIComponent(my.sym)}&range=${my.range}`);
+    if (cur !== my) return;
+    my.data = d;
+    if (!my.name && d.name) $('#dName').textContent = d.name;
+    drawChart(d, my.range, animate);
+  } catch { if (cur === my) $('#chartbox').innerHTML = '<div class="muted" style="padding:60px;text-align:center">走勢圖載入失敗</div>'; }
+  finally { $('#dlgLoad').classList.remove('on'); }
+}
+
+function drawChart(d, range, animate) {
+  const s = d.series || [];
+  const box = $('#chartbox');
+  if (s.length < 2) { box.innerHTML = '<div class="muted" style="padding:60px;text-align:center">此區間沒有資料</div>'; return; }
+  const tw = isTW(d.symbol), tz = tw ? 'Asia/Taipei' : 'America/New_York';
+  const oneDay = range === '1d' && !d.fallback;
+  const base = range === '1d' ? d.prevClose : s[0].c;
+  const last = s[s.length - 1].c;
+  const chg = last - base, pct = base ? chg / base * 100 : 0;
+  const up = chg >= 0, color = `var(${up ? '--up' : '--down'})`;
+
+  // 標題數字（含滾動動畫）
+  $('#dPrice').innerHTML = num('d:' + d.symbol, d.price, 'p');
+  $('#dChg').className = 'num ' + cls(chg);
+  $('#dChg').innerHTML = `${fmtChg(chg)} (${fmtPct(pct)}) <span class="muted" style="font-size:12px">${RANGES.find(r => r[0] === range)[1]}</span>`;
+  $('#dNote').textContent = d.fallback ? '此標的僅提供當日走勢' : '';
+  animateNums($('#dPrice'));
+
+  const W = box.clientWidth || 900, H = Math.min(380, Math.max(260, W * 0.42)), padL = 8, padR = 62, padT = 12, volH = 52, gap = 8, axisH = 20;
+  const priceH = H - padT - volH - gap - axisH;
+  // 當日走勢以完整交易時段為 X 軸寬度，盤中會看到走勢逐步「長」出來
+  const slots = oneDay ? Math.max(s.length, tw ? 271 : 78) : s.length;
+  const x = i => padL + (i / (slots - 1)) * (W - padL - padR);
+  let lo = Math.min(...s.map(p => p.l ?? p.c), oneDay ? base : Infinity), hi = Math.max(...s.map(p => p.h ?? p.c), oneDay ? base : -Infinity);
+  const padY = (hi - lo) * 0.08 || hi * 0.01; lo -= padY; hi += padY;
+  const y = v => padT + (hi - v) / (hi - lo) * priceH;
+  const maxV = Math.max(...s.map(p => p.v || 0)) || 1;
+  const vy0 = padT + priceH + gap + volH;
+
+  const pts = s.map((p, i) => `${x(i).toFixed(1)},${y(p.c).toFixed(1)}`).join(' ');
+  const area = `${x(0).toFixed(1)},${(padT + priceH).toFixed(1)} ${pts} ${x(s.length - 1).toFixed(1)},${(padT + priceH).toFixed(1)}`;
+  const bw = Math.max(1, (W - padL - padR) / slots * 0.7);
+  const bars = s.map((p, i) => {
+    const hgt = (p.v || 0) / maxV * volH, c = i && p.c < s[i - 1].c ? '--down' : '--up';
+    return `<rect x="${(x(i) - bw / 2).toFixed(1)}" y="${(vy0 - hgt).toFixed(1)}" width="${bw.toFixed(1)}" height="${hgt.toFixed(1)}" fill="var(${c})" opacity=".45"/>`;
+  }).join('');
+  const ticks = [...Array(5)].map((_, i) => lo + (hi - lo) * (i / 4));
+  const grid = ticks.map(v => `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}" stroke-dasharray="2 4"/><text x="${W - padR + 6}" y="${y(v) + 4}">${fmtP(v)}</text>`).join('');
+  const fmtT = t => new Intl.DateTimeFormat('zh-TW', oneDay || range === '1d' ? { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }
+    : range === '5d' || range === '1mo' ? { timeZone: tz, month: 'numeric', day: 'numeric' } : { timeZone: tz, year: 'numeric', month: 'numeric' }).format(new Date(t * 1000));
+  const xl = [...Array(6)].map((_, k) => Math.round(k / 5 * (s.length - 1)))
+    .map(i => `<text x="${x(i)}" y="${H - 4}" text-anchor="${i === 0 ? 'start' : i === s.length - 1 ? 'end' : 'middle'}">${fmtT(s[i].t)}</text>`).join('');
+  const baseLine = oneDay ? `<line x1="${padL}" x2="${W - padR}" y1="${y(base)}" y2="${y(base)}" stroke="var(--muted)" stroke-dasharray="5 4" opacity=".7"/>
+    <text x="${W - padR + 6}" y="${y(base) - 6}" style="fill:var(--text)">昨收</text>` : '';
+  const lx = x(s.length - 1), ly = y(last);
+
+  box.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    <defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".35"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+    <g class="grid">${grid}</g>${baseLine}
+    <g>${bars}</g>
+    <polygon class="area" fill="url(#cg)" points="${area}" style="opacity:${animate ? 0 : 1}"/>
+    <polyline class="line" stroke="${color}" points="${pts}"/>
+    <circle cx="${lx}" cy="${ly}" r="4" fill="${color}"><animate attributeName="r" values="4;8;4" dur="1.6s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;.4;1" dur="1.6s" repeatCount="indefinite"/></circle>
+    ${xl}
+    <g class="cross"><line id="cx" y1="${padT}" y2="${vy0}" stroke="var(--muted)" stroke-dasharray="3 3"/><line id="cy" x1="${padL}" x2="${W - padR}" stroke="var(--muted)" stroke-dasharray="3 3"/>
+      <circle id="cd" r="5" fill="${color}" stroke="#fff" stroke-width="2"/></g>
+  </svg><div class="tip" id="tip"></div>`;
+
+  // 線條「畫出來」的動畫
+  if (animate && !reduceMotion) {
+    const line = box.querySelector('.line'), len = line.getTotalLength();
+    line.style.strokeDasharray = len; line.style.strokeDashoffset = len;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      line.classList.add('draw'); line.style.strokeDashoffset = 0; box.querySelector('.area').style.opacity = 1;
+    }));
+  }
+
+  // 十字游標 + 提示框
+  const svg = box.querySelector('svg'), tip = $('#tip');
+  const fmtFull = t => new Intl.DateTimeFormat('zh-TW', { timeZone: tz, month: 'numeric', day: 'numeric', ...(range === '6mo' || range === '1y' || range === '5y' ? { year: 'numeric' } : { hour: '2-digit', minute: '2-digit', hour12: false }) }).format(new Date(t * 1000));
+  const move = ev => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.touches?.[0] || ev).clientX - r.left;
+    const i = Math.max(0, Math.min(s.length - 1, Math.round((px - padL) / (W - padL - padR) * (slots - 1))));
+    const p = s[i], cxp = x(i), cyp = y(p.c), dp = base ? (p.c - base) / base * 100 : 0;
+    svg.querySelector('#cx').setAttribute('x1', cxp); svg.querySelector('#cx').setAttribute('x2', cxp);
+    svg.querySelector('#cy').setAttribute('y1', cyp); svg.querySelector('#cy').setAttribute('y2', cyp);
+    svg.querySelector('#cd').setAttribute('cx', cxp); svg.querySelector('#cd').setAttribute('cy', cyp);
+    tip.innerHTML = `<div class="muted">${fmtFull(p.t)}</div><div><b>${fmtP(p.c)}</b> <span class="${cls(dp)}">${fmtPct(dp)}</span></div>
+      ${p.h != null ? `<div class="muted">高 ${fmtP(p.h)} · 低 ${fmtP(p.l)}</div>` : ''}<div class="muted">量 ${vol(p.v, d.symbol)}</div>`;
+    const tw2 = tip.offsetWidth;
+    tip.style.left = Math.min(W - tw2 - 4, Math.max(0, cxp + (cxp > W / 2 ? -tw2 - 14 : 14))) + 'px';
+    tip.style.top = Math.max(0, Math.min(cyp - 20, H - tip.offsetHeight - 30)) + 'px';
+  };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('touchstart', e => { box.classList.add('touch'); move(e); }, { passive: true });
+  svg.addEventListener('touchmove', move, { passive: true });
+  svg.addEventListener('touchend', () => box.classList.remove('touch'));
+
+  // 統計
+  const hiR = Math.max(...s.map(p => p.h ?? p.c)), loR = Math.min(...s.map(p => p.l ?? p.c));
+  const totalV = s.reduce((a, p) => a + (p.v || 0), 0);
+  const st = oneDay
+    ? [['開盤', fmtP(d.open ?? s[0].o)], ['最高', fmtP(d.dayHigh ?? hiR)], ['最低', fmtP(d.dayLow ?? loR)], ['昨收', fmtP(d.prevClose)],
+       ['成交量', vol(d.volume ?? totalV, d.symbol)], ['振幅', d.prevClose ? (((d.dayHigh ?? hiR) - (d.dayLow ?? loR)) / d.prevClose * 100).toFixed(2) + '%' : '—']]
+    : [['區間最高', fmtP(hiR)], ['區間最低', fmtP(loR)], ['期初', fmtP(s[0].c)], ['區間漲跌', fmtPct(pct)], ['區間成交量', vol(totalV, d.symbol)], ['資料點', s.length]];
+  $('#dStats').innerHTML = st.map(([k, v]) => `<div><span>${k}</span><b class="num">${v}</b></div>`).join('');
+}
+addEventListener('resize', () => { if (cur?.data) drawChart(cur.data, cur.range, false); });
+
+// 點任何代號 → 放大走勢圖 + 新聞
+document.addEventListener('click', e => {
+  const del = e.target.closest('[data-del]');
+  if (del) {
+    e.stopPropagation();
+    const tr = del.closest('tr'); tr.classList.add('removing');
+    setTimeout(() => { watch = watch.filter(s => s !== del.dataset.del); store.set('watchlist2', watch); loadWatch(); }, 280);
+    return;
+  }
+  const el = e.target.closest('[data-sym]'); if (!el || el.closest('dialog')) return;
+  e.preventDefault();
+  openChart(el.dataset.sym, el.dataset.name);
+});
+
+// ---------- 自動更新排程 ----------
+function resetMarketView() {
+  firstIdx = true; etfFirst = true; focusSeen = new Set(); movers = null; tab = 'gainers'; tapeItems = { idx: [], etf: [] };
+  const sk = n => Array(n).fill('<div class="sk"></div>').join('');
+  $('#indices').innerHTML = sk(6); $('#focus').innerHTML = sk(6);
+  $('#movers').innerHTML = ''; $('#etfs').innerHTML = ''; $('#news').innerHTML = '<li><div class="sk" style="width:100%"></div></li>';
+  $('#etfTitle').textContent = market === 'tw' ? '📊 台股 ETF（市值型 / 高股息 / 主題 / 槓桿反向 / 債券）' : '📊 美股熱門 ETF';
+  $('#focusHint').textContent = market === 'tw' ? '上市櫃漲跌幅最大、成交值最高的個股與背後新聞 · 每 60 秒更新' : '漲跌幅最大的熱門股與背後新聞 · 每 60 秒更新';
+  setState(null); renderTabs();
+}
+const safe = fn => () => fn().catch(err => console.warn(err));
+const stamp = () => { $('#updated').textContent = '更新於 ' + new Date().toLocaleTimeString('zh-TW', { hour12: false }); };
+const fast = async () => { await Promise.all([safe(loadIndices)(), safe(loadWatch)(), safe(loadEtfs)()]); stamp(); };
+const slow = () => Promise.all([safe(loadFocus)(), safe(loadMovers)()]);
+async function all() {
+  $('#refreshBtn').classList.add('spin');
+  await Promise.all([fast(), slow(), safe(loadNews)()]);
+  $('#refreshBtn').classList.remove('spin');
+}
+$('#refreshBtn').onclick = all;
+
+movePill(); resetMarketView(); all();
+// 支援網址直接開圖，例如 http://localhost:3000/#chart=2330.TW
+if (location.hash.startsWith('#chart=')) openChart(decodeURIComponent(location.hash.slice(7)), '');
+setInterval(() => { if (!document.hidden) fast(); }, 15_000);
+setInterval(() => { if (!document.hidden) slow(); }, 60_000);
+setInterval(() => { if (!document.hidden) safe(loadNews)(); }, 300_000);
+</script>
+</body>
+</html>
